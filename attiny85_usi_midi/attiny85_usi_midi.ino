@@ -30,10 +30,13 @@
 #define NOTEON_CHAN_8              0x97
 #define NOTEON_CHAN_9              0x98
 
+#define CC_CHAN               CC_CHAN_1
+#define NOTEON_CHAN       NOTEON_CHAN_1
+#define PLAY_WITH_CC                  1
+#define PLAY_WITH_NOTE_ON             1
+
 #define FAVOR_PHASE_CORRECT_PWM  0
 #define MS_TIMER_TICK_EVERY_X_CYCLES  1
-
-#define DEBOUNCE_DELAY               10 // Debounce time; increase if the output flickers
 
 volatile uint8_t MIDISTATE =         0;
 volatile uint8_t MIDIRUNNINGSTATUS = 0;
@@ -41,9 +44,6 @@ volatile uint8_t MIDINOTE;
 volatile uint8_t MIDIVEL;
 
 volatile uint8_t gpio_switch;
-volatile uint8_t gpio_switch_reading;   // reading before debounce
-volatile uint8_t last_gpio_state = LOW; // the previous reading from the gpio pin
-unsigned long    last_deb_time =     0; // the last time the gpio pin was toggled
 
 volatile int     cv_input;
 
@@ -122,7 +122,8 @@ void MIDIParse(unsigned char MIDIRX) {
     MIDIVEL=MIDIRX;
     MIDISTATE=1;
 // OPTION 1 : Play with CC with Controler 11
-    if (MIDIRUNNINGSTATUS==CC_CHAN_1) {
+#if PLAY_WITH_CC == 1
+    if (MIDIRUNNINGSTATUS==CC_CHAN) {
       // Controler 11 == Expression pedal
       if (MIDINOTE == 11){
         // Midi res is 128 -> analogWrite res is 256
@@ -132,13 +133,15 @@ void MIDIParse(unsigned char MIDIRX) {
         analogWrite(1, 0);
       }
     }
+#endif
 // OPTION 2 : Play with NOTE ON
-//    if ((MIDIRUNNINGSTATUS==NOTEON_CHAN_1)) {
-//      analogWrite(1, MIDINOTE*2);
-//      }
-//    }
-    return;
-  }  
+#if PLAY_WITH_NOTE_ON == 1
+    if ((MIDIRUNNINGSTATUS==NOTEON_CHAN)) {
+      analogWrite(1, MIDINOTE*2);
+    }
+#endif
+  }
+  return;
 }
 
 // Main **********************************************
@@ -157,27 +160,12 @@ void setup() {
   pinMode(2, INPUT);  // CV in
   pinMode(3, INPUT);  // Temp in
 
-  gpio_switch = HIGH;
+  gpio_switch = LOW;
 }
 
 void loop() {
   // Read the switch state
-  gpio_switch_reading = digitalRead(2);
-
-  if (gpio_switch_reading != last_gpio_state) {
-      // reset the debouncing timer
-      last_deb_time = millis();
-    }
-
-  if ((millis() - last_deb_time) > DEBOUNCE_DELAY) {
-    // whatever the reading is at, it's been there for longer than the debounce
-    // delay, so take it as the actual current state:
-
-    // if the button state has changed:
-    if (gpio_switch_reading != gpio_switch) {
-      gpio_switch = gpio_switch_reading;
-    }
-  }
+  gpio_switch = digitalRead(2);
 
   // Act as a MIDI/CV switch
   if (gpio_switch == LOW)
@@ -186,6 +174,4 @@ void loop() {
     // analogRead res is 1024 -> analogWrite is 256
     analogWrite(1, cv_input/4);
   }
-  
-  last_gpio_state = gpio_switch_reading;
 }
