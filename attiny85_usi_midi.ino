@@ -11,19 +11,45 @@
 
    FUSES/Conf : 16Mhz internal
 */
-#define FAVOR_PHASE_CORRECT_PWM  0
-#define MS_TIMER_TICK_EVERY_X_CYCLES 1
+#define CC_CHAN_1                  0xB0
+#define CC_CHAN_2                  0xB1
+#define CC_CHAN_3                  0xB2
+#define CC_CHAN_4                  0xB3
+#define CC_CHAN_5                  0xB4
+#define CC_CHAN_6                  0xB5
+#define CC_CHAN_7                  0xB6
+#define CC_CHAN_8                  0xB7
+#define CC_CHAN_9                  0xB8
+#define NOTEON_CHAN_1              0x90
+#define NOTEON_CHAN_2              0x91
+#define NOTEON_CHAN_3              0x92
+#define NOTEON_CHAN_4              0x93
+#define NOTEON_CHAN_5              0x94
+#define NOTEON_CHAN_6              0x95
+#define NOTEON_CHAN_7              0x96
+#define NOTEON_CHAN_8              0x97
+#define NOTEON_CHAN_9              0x98
 
-volatile uint8_t MIDISTATE = 0;
+#define FAVOR_PHASE_CORRECT_PWM  0
+#define MS_TIMER_TICK_EVERY_X_CYCLES  1
+
+#define DEBOUNCE_DELAY               10 // Debounce time; increase if the output flickers
+
+volatile uint8_t MIDISTATE =         0;
 volatile uint8_t MIDIRUNNINGSTATUS = 0;
 volatile uint8_t MIDINOTE;
 volatile uint8_t MIDIVEL;
-volatile uint8_t switch_midi_or_cv;
-volatile int pot;
-volatile int tmp;
+
+volatile uint8_t gpio_switch;
+volatile uint8_t gpio_switch_reading;   // reading before debounce
+volatile uint8_t last_gpio_state = LOW; // the previous reading from the gpio pin
+unsigned long    last_deb_time =     0; // the last time the gpio pin was toggled
+
+volatile int     cv_input;
 
 // Constant
-const int DataIn = PINB0;         // USI DI
+// USI DI
+const int DataIn =               PINB0;
 
 // USI UART **********************************************
 
@@ -90,24 +116,27 @@ void MIDIParse(unsigned char MIDIRX) {
       MIDINOTE = MIDIRX;
       MIDISTATE++;
       return;
-    }// TODO: pas sûr
+    }
   }
-  if (MIDISTATE==2 && switch_midi_or_cv == HIGH) {
+  if (MIDISTATE==2 && gpio_switch == HIGH) {
     MIDIVEL=MIDIRX;
     MIDISTATE=1;
-    if ((MIDIRUNNINGSTATUS==0x80)||(MIDIRUNNINGSTATUS==0x90)) {
-//      if (MIDINOTE<36) MIDINOTE=36; //If note is lower than C2 set it to C2
-//      MIDINOTE=MIDINOTE-36; //Subtract 36 to get into CV range
-//      if (MIDINOTE>60) MIDINOTE=60; //If note is higher than C7 set it to C7
-        if (MIDIRUNNINGSTATUS == 0x90) { //If note on
-//        if (MIDIVEL>0) digitalWrite(2, HIGH); //Set Gate HIGH
-//        if (MIDIVEL==0) digitalWrite(2, LOW); //Set Gate LOW
-        analogWrite(1, MIDINOTE*2);
+// OPTION 1 : Play with CC with Controler 11
+    if (MIDIRUNNINGSTATUS==CC_CHAN_1) {
+      // Controler 11 == Expression pedal
+      if (MIDINOTE == 11){
+        // Midi res is 128 -> analogWrite res is 256
+        analogWrite(1, MIDIVEL*2);
       }
-//      if (MIDIRUNNINGSTATUS == 0x80) { //If note off
-//        digitalWrite(2, LOW); //Set Gate LOW
-//      }
+      if (MIDINOTE == 123){
+        analogWrite(1, 0);
+      }
     }
+// OPTION 2 : Play with NOTE ON
+//    if ((MIDIRUNNINGSTATUS==NOTEON_CHAN_1)) {
+//      analogWrite(1, MIDINOTE*2);
+//      }
+//    }
     return;
   }  
 }
@@ -127,15 +156,36 @@ void setup() {
   pinMode(1, OUTPUT); // Enable PWM output pin
   pinMode(2, INPUT);  // CV in
   pinMode(3, INPUT);  // Temp in
+
+  gpio_switch = HIGH;
 }
 
 void loop() {
-  //digitalWrite(1, !digitalRead(1));
-  //delay(500);
-  switch_midi_or_cv = digitalRead (2);
-  if (switch_midi_or_cv == LOW)
-  {
-    pot = analogRead(2);
-    analogWrite(1, pot/4);
+  // Read the switch state
+  gpio_switch_reading = digitalRead(2);
+
+  if (gpio_switch_reading != last_gpio_state) {
+      // reset the debouncing timer
+      last_deb_time = millis();
+    }
+
+  if ((millis() - last_deb_time) > DEBOUNCE_DELAY) {
+    // whatever the reading is at, it's been there for longer than the debounce
+    // delay, so take it as the actual current state:
+
+    // if the button state has changed:
+    if (gpio_switch_reading != gpio_switch) {
+      gpio_switch = gpio_switch_reading;
+    }
   }
+
+  // Act as a MIDI/CV switch
+  if (gpio_switch == LOW)
+  {
+    cv_input = analogRead(2);
+    // analogRead res is 1024 -> analogWrite is 256
+    analogWrite(1, cv_input/4);
+  }
+  
+  last_gpio_state = gpio_switch_reading;
 }
